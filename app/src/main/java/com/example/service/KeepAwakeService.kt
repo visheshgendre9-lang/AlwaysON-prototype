@@ -8,10 +8,13 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.View
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.data.PreferencesManager
@@ -28,6 +31,8 @@ import kotlinx.coroutines.launch
 class KeepAwakeService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var windowManager: WindowManager? = null
+    private var overlayView: View? = null
     private var timerJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main)
     private lateinit var prefs: PreferencesManager
@@ -87,6 +92,7 @@ class KeepAwakeService : Service() {
     private fun startKeepAwake(minutes: Int, isInfinite: Boolean, customMessage: String) {
         acquireWakeLock()
         applySystemTimeout(minutes, isInfinite)
+        addKeepAwakeOverlay()
 
         val totalSecs = if (isInfinite) 0 else minutes * 60
         val session = KeepAwakeSession(
@@ -150,10 +156,42 @@ class KeepAwakeService : Service() {
         timerJob = null
         releaseWakeLock()
         restoreSystemTimeout()
+        removeKeepAwakeOverlay()
 
         _sessionState.value = _sessionState.value.copy(isActive = false, remainingSeconds = 0)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    private fun addKeepAwakeOverlay() {
+        if (overlayView != null) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+                windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+                val params = WindowManager.LayoutParams(
+                    1, 1,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                )
+                val view = View(this)
+                windowManager?.addView(view, params)
+                overlayView = view
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun removeKeepAwakeOverlay() {
+        try {
+            overlayView?.let { view ->
+                windowManager?.removeView(view)
+            }
+        } catch (_: Exception) {}
+        overlayView = null
+        windowManager = null
     }
 
     private fun applySystemTimeout(minutes: Int, isInfinite: Boolean) {

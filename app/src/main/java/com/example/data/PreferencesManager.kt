@@ -23,6 +23,10 @@ class PreferencesManager(context: Context) {
         get() = prefs.getInt(KEY_ORIGINAL_TIMEOUT, 30000)
         set(value) = prefs.edit().putInt(KEY_ORIGINAL_TIMEOUT, value).apply()
 
+    var savedNotes: String
+        get() = prefs.getString(KEY_SAVED_NOTES, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_SAVED_NOTES, value).apply()
+
     var totalActiveMinutes: Int
         get() = prefs.getInt(KEY_TOTAL_ACTIVE_MINUTES, 0)
         set(value) = prefs.edit().putInt(KEY_TOTAL_ACTIVE_MINUTES, value).apply()
@@ -36,6 +40,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_LAST_MINUTES = "key_last_minutes"
         private const val KEY_LAST_INFINITE = "key_last_infinite"
         private const val KEY_ORIGINAL_TIMEOUT = "key_original_timeout"
+        private const val KEY_SAVED_NOTES = "key_saved_notes"
         private const val KEY_TOTAL_ACTIVE_MINUTES = "key_total_active_minutes"
     }
 }

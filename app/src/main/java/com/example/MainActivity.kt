@@ -26,19 +26,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Unconditionally keep screen awake while MainActivity is open
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         setContent {
             ScreenAwakeTheme {
-                val session by viewModel.sessionState.collectAsState()
-
-                // Dynamically update Activity window FLAG_KEEP_SCREEN_ON
-                LaunchedEffect(session.isActive) {
-                    if (session.isActive) {
-                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    } else {
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    }
-                }
-
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = GlassBackgroundDark

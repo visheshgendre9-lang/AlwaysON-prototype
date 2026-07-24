@@ -24,6 +24,14 @@ class ScreenAwakeViewModel(application: Application) : AndroidViewModel(applicat
     private val _customMessage = MutableStateFlow(prefs.customMessage)
     val customMessage: StateFlow<String> = _customMessage.asStateFlow()
 
+    private val _savedNotes = MutableStateFlow(prefs.savedNotes)
+    val savedNotes: StateFlow<String> = _savedNotes.asStateFlow()
+
+    fun updateNotes(text: String) {
+        _savedNotes.value = text
+        prefs.savedNotes = text
+    }
+
     fun selectPreset(minutes: Int, infinite: Boolean) {
         _selectedMinutes.value = minutes
         _isInfinite.value = infinite

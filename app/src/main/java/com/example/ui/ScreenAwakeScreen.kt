@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.PowerSettingsNew
@@ -67,13 +68,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.ui.components.CustomMessageCard
 import com.example.ui.components.GlassCard
+import com.example.ui.components.InAppNotesCard
 import com.example.ui.components.LiquidTimerRing
 import com.example.ui.components.PresetSelector
 import com.example.ui.theme.CyanLiquid
 import com.example.ui.theme.EmeraldLiquid
 import com.example.ui.theme.GlassBackgroundDark
 import com.example.ui.theme.GlassSurfaceBorder
-import com.example.ui.theme.GlassSurfaceDark
 import com.example.ui.theme.GlassTextMuted
 import com.example.ui.theme.GlassTextPrimary
 import com.example.ui.theme.GlassTextSecondary
@@ -91,6 +92,7 @@ fun ScreenAwakeScreen(
     val selectedMinutes by viewModel.selectedMinutes.collectAsState()
     val isInfinite by viewModel.isInfinite.collectAsState()
     val customMessage by viewModel.customMessage.collectAsState()
+    val savedNotes by viewModel.savedNotes.collectAsState()
 
     // Notification Permission Handling for Android 13+
     var hasNotificationPermission by remember {
@@ -108,6 +110,19 @@ fun ScreenAwakeScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasNotificationPermission = isGranted
+    }
+
+    // Background System Permissions State
+    val canWriteSettings = remember(context, session.isActive) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.System.canWrite(context)
+        } else true
+    }
+
+    val canDrawOverlays = remember(context, session.isActive) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else true
     }
 
     // Liquid background gradient animations
@@ -239,18 +254,66 @@ fun ScreenAwakeScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            val canWriteSettings = remember(context) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    Settings.System.canWrite(context)
-                } else true
+            // System Overlay Permission Banner
+            if (!canDrawOverlays && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    backgroundColor = Color(0x226366F1)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Layers,
+                                contentDescription = null,
+                                tint = IndigoLiquid,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Enable Overlay permission so screen stays awake system-wide in external note & reader apps.",
+                                fontSize = 11.sp,
+                                color = GlassTextPrimary
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(IndigoLiquid)
+                                .clickable {
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${context.packageName}")
+                                    )
+                                    context.startActivity(intent)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "Allow",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
             }
 
-            // System Timeout Permission Banner if required
+            // System Timeout Permission Banner
             if (!canWriteSettings && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp),
+                        .padding(bottom = 12.dp),
                     backgroundColor = Color(0x2206B6D4)
                 ) {
                     Row(
@@ -270,8 +333,8 @@ fun ScreenAwakeScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Enable System Timeout control so screen stays awake in background note apps.",
-                                fontSize = 12.sp,
+                                text = "Enable Write System Settings to automatically override screen off timeout.",
+                                fontSize = 11.sp,
                                 color = GlassTextPrimary
                             )
                         }
@@ -290,7 +353,7 @@ fun ScreenAwakeScreen(
                         ) {
                             Text(
                                 text = "Grant",
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.Black
                             )
@@ -299,12 +362,12 @@ fun ScreenAwakeScreen(
                 }
             }
 
-            // Notification Permission Banner if required
+            // Notification Permission Banner
             if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 16.dp),
+                        .padding(bottom = 12.dp),
                     backgroundColor = Color(0x33F59E0B)
                 ) {
                     Row(
@@ -325,7 +388,7 @@ fun ScreenAwakeScreen(
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
                                 text = "Allow notifications so status message stays visible while awake.",
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 color = GlassTextPrimary
                             )
                         }
@@ -340,7 +403,7 @@ fun ScreenAwakeScreen(
                         ) {
                             Text(
                                 text = "Enable",
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.Black
                             )
@@ -425,6 +488,16 @@ fun ScreenAwakeScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // In-App Liquid Glass Scratchpad Notes Card
+            InAppNotesCard(
+                notesText = savedNotes,
+                onNotesChange = { newNotes ->
+                    viewModel.updateNotes(newNotes)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // Custom Notification Message Card
             CustomMessageCard(
                 currentMessage = customMessage,
@@ -448,22 +521,23 @@ fun ScreenAwakeScreen(
                             .background(EmeraldLiquid.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "📝", fontSize = 18.sp)
+                        Text(text = "💡", fontSize = 18.sp)
                     }
 
                     Spacer(modifier = Modifier.width(12.dp))
 
                     Column {
                         Text(
-                            text = "Perfect for Note-Taking & Reading",
+                            text = "How Screen Awake keeps your display on",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = GlassTextPrimary
                         )
                         Text(
-                            text = "Screen Awake holds the backlight bright while you copy notes or study without touching the glass.",
+                            text = "1. In-App Scratchpad: Screen stays 100% awake automatically while reading or editing notes inside the app.\n2. External Apps: Keep Awake Foreground Service + System Overlay ensures backlight stays bright while taking notes in other apps.",
                             fontSize = 11.sp,
-                            color = GlassTextSecondary
+                            color = GlassTextSecondary,
+                            lineHeight = 15.sp
                         )
                     }
                 }
