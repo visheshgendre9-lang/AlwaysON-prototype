@@ -7,12 +7,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
-import com.example.R
+import com.example.data.PreferencesManager
 import com.example.model.KeepAwakeSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,11 +30,13 @@ class KeepAwakeService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var timerJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main)
+    private lateinit var prefs: PreferencesManager
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        prefs = PreferencesManager(applicationContext)
         createNotificationChannel()
     }
 
@@ -43,11 +47,24 @@ class KeepAwakeService : Service() {
             ACTION_STOP -> {
                 stopKeepAwake()
             }
+            ACTION_ADD_5_MINS -> {
+                val current = _sessionState.value
+                if (current.isActive && !current.isInfinite) {
+                    val newSecs = current.remainingSeconds + 300
+                    val totalSecs = current.totalSeconds + 300
+                    _sessionState.value = current.copy(
+                        remainingSeconds = newSecs,
+                        totalSeconds = totalSecs
+                    )
+                    updateNotification(_sessionState.value)
+                    applySystemTimeout(newSecs / 60, false)
+                }
+            }
             ACTION_UPDATE_MESSAGE -> {
                 val newMessage = intent?.getStringExtra(EXTRA_CUSTOM_MESSAGE)
                 if (!newMessage.isNullOrBlank()) {
                     val current = _sessionState.value
-                    val updatedMsg = newMessage ?: KeepAwakeSession.DEFAULT_MESSAGE
+                    val updatedMsg = newMessage
                     _sessionState.value = current.copy(customMessage = updatedMsg)
                     if (current.isActive) {
                         updateNotification(current.copy(customMessage = updatedMsg))
@@ -69,6 +86,7 @@ class KeepAwakeService : Service() {
 
     private fun startKeepAwake(minutes: Int, isInfinite: Boolean, customMessage: String) {
         acquireWakeLock()
+        applySystemTimeout(minutes, isInfinite)
 
         val totalSecs = if (isInfinite) 0 else minutes * 60
         val session = KeepAwakeSession(
@@ -81,7 +99,7 @@ class KeepAwakeService : Service() {
         )
         _sessionState.value = session
 
-        startForeground(NOTIFICATION_ID, buildNotification(session))
+        startForegroundWithNotification(session)
 
         timerJob?.cancel()
         timerJob = serviceScope.launch {
@@ -114,27 +132,87 @@ class KeepAwakeService : Service() {
         }
     }
 
+    private fun startForegroundWithNotification(session: KeepAwakeSession) {
+        val notification = buildNotification(session)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
     private fun stopKeepAwake() {
         timerJob?.cancel()
         timerJob = null
         releaseWakeLock()
+        restoreSystemTimeout()
 
         _sessionState.value = _sessionState.value.copy(isActive = false, remainingSeconds = 0)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
+    private fun applySystemTimeout(minutes: Int, isInfinite: Boolean) {
+        try {
+            if (Settings.System.canWrite(applicationContext)) {
+                val currentSystemTimeout = Settings.System.getInt(
+                    contentResolver,
+                    Settings.System.SCREEN_OFF_TIMEOUT,
+                    30000
+                )
+                // Store original timeout if not set yet to extreme high
+                if (currentSystemTimeout < 12 * 60 * 60 * 1000) {
+                    prefs.originalTimeoutMs = currentSystemTimeout
+                }
+
+                val targetTimeoutMs = if (isInfinite) {
+                    24 * 60 * 60 * 1000 // 24 hours
+                } else {
+                    (minutes * 60 * 1000).coerceAtLeast(60000)
+                }
+
+                Settings.System.putInt(
+                    contentResolver,
+                    Settings.System.SCREEN_OFF_TIMEOUT,
+                    targetTimeoutMs
+                )
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun restoreSystemTimeout() {
+        try {
+            if (Settings.System.canWrite(applicationContext)) {
+                val orig = prefs.originalTimeoutMs
+                if (orig > 0) {
+                    Settings.System.putInt(
+                        contentResolver,
+                        Settings.System.SCREEN_OFF_TIMEOUT,
+                        orig
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     @Suppress("DEPRECATION")
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        // Using SCREEN_BRIGHT_WAKE_LOCK or FULL_WAKE_LOCK with ON_AFTER_RELEASE
+        val wakeFlags = PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                PowerManager.ON_AFTER_RELEASE
+
         wakeLock = powerManager.newWakeLock(
-            PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE,
+            wakeFlags,
             "ScreenAwake::KeepScreenAliveWakeLock"
         ).apply {
             setReferenceCounted(false)
-            acquire(12 * 60 * 60 * 1000L) // Safety max 12 hrs
+            acquire(24 * 60 * 60 * 1000L) // Max 24 hours safety
         }
     }
 
@@ -159,7 +237,7 @@ class KeepAwakeService : Service() {
                 enableVibration(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager?.createNotificationChannel(channel)
         }
     }
 
@@ -180,9 +258,17 @@ class KeepAwakeService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val add5Intent = Intent(this, KeepAwakeService::class.java).apply {
+            action = ACTION_ADD_5_MINS
+        }
+        val pendingAdd5Intent = PendingIntent.getService(
+            this, 2, add5Intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val subText = if (session.isInfinite) "Status: Always On" else "Time Left: ${session.formattedRemainingTime}"
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Screen Keeping On ($subText)")
             .setContentText(session.customMessage)
             .setStyle(NotificationCompat.BigTextStyle().bigText(session.customMessage))
@@ -190,12 +276,22 @@ class KeepAwakeService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingOpenIntent)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Turn Off",
-                pendingStopIntent
+
+        if (!session.isInfinite) {
+            builder.addAction(
+                android.R.drawable.ic_input_add,
+                "+5 Min",
+                pendingAdd5Intent
             )
-            .build()
+        }
+
+        builder.addAction(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            "Turn Off",
+            pendingStopIntent
+        )
+
+        return builder.build()
     }
 
     private fun updateNotification(session: KeepAwakeSession) {
@@ -214,6 +310,7 @@ class KeepAwakeService : Service() {
 
         const val ACTION_START = "com.example.action.START_KEEP_AWAKE"
         const val ACTION_STOP = "com.example.action.STOP_KEEP_AWAKE"
+        const val ACTION_ADD_5_MINS = "com.example.action.ADD_5_MINS"
         const val ACTION_UPDATE_MESSAGE = "com.example.action.UPDATE_MESSAGE"
 
         const val EXTRA_MINUTES = "extra_minutes"
